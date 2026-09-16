@@ -923,6 +923,28 @@ const inMemoryClient = createInMemoryClient();
 // ---------------------------------------------------------------------------
 // PRISMA CLIENT SINGLETON WITH AUTOMATIC FALLBACK
 // ---------------------------------------------------------------------------
+
+/**
+ * Normalizes PostgreSQL connection URLs to ensure special characters in passwords
+ * (like #, @, $, %, etc.) are safely percent-encoded for Node.js URL parser.
+ */
+function sanitizeDatabaseUrl(urlStr: string): string {
+  try {
+    // Attempt standard URL parse first
+    new URL(urlStr);
+    return urlStr;
+  } catch {
+    // If standard parsing fails due to unencoded special characters in the credentials:
+    // Format: postgresql://[user]:[password]@[host]:[port]/[database]...
+    const match = urlStr.match(/^((?:postgresql|postgres):\/\/[^:]+:)(.*)(@[^@]+)$/);
+    if (match) {
+      const [, prefix, rawPassword, suffix] = match;
+      return `${prefix}${encodeURIComponent(rawPassword)}${suffix}`;
+    }
+    return urlStr;
+  }
+}
+
 const prismaClientSingleton = () => {
   const dbUrl = process.env.DATABASE_URL;
 
@@ -933,7 +955,12 @@ const prismaClientSingleton = () => {
   }
 
   try {
-    const pool = new Pool({ connectionString: dbUrl, max: 10 });
+    const sanitizedUrl = sanitizeDatabaseUrl(dbUrl);
+    const pool = new Pool({
+      connectionString: sanitizedUrl,
+      ssl: { rejectUnauthorized: false },
+      max: 10,
+    });
     const adapter = new PrismaPg(pool);
     const client = new PrismaClient({ adapter });
 
