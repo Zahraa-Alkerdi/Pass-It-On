@@ -105,7 +105,8 @@ export async function getSupportAIResponse(
     const ai = getGeminiClient();
 
     if (ai) {
-      const systemInstruction = `You are the friendly, knowledgeable Support AI for "PassItOn", a student skill mentorship platform with a pay-it-forward philosophy.
+      try {
+        const systemInstruction = `You are the friendly, knowledgeable Support AI for "PassItOn", a student skill mentorship platform with a pay-it-forward philosophy.
 Your goal is to guide students and mentors through platform features, project submissions, workspace milestones, and rules.
 
 PLATFORM ARCHITECTURE & RULES:
@@ -135,28 +136,32 @@ RESPONSE GUIDELINES:
 - Use clear bullet points and clean formatting.
 - Keep tone encouraging, professional, and concise.`;
 
-      const contents = [];
-      for (const msg of messageHistory.slice(-6)) {
+        const contents = [];
+        for (const msg of messageHistory.slice(-6)) {
+          contents.push({
+            role: msg.role === 'user' ? 'user' : 'model',
+            parts: [{ text: msg.content }],
+          });
+        }
+
         contents.push({
-          role: msg.role === 'user' ? 'user' : 'model',
-          parts: [{ text: msg.content }],
+          role: 'user',
+          parts: [{ text: `${systemInstruction}\n\nUser Question: "${userMessage}"` }],
         });
+
+        const response = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents,
+        });
+
+        return {
+          text: response.text || 'I am here to assist you with any questions about PassItOn!',
+          suggestedLinks,
+        };
+      } catch (geminiError) {
+        // If Gemini is unavailable or rate-limited (e.g. 429, 503), log and fall back to the knowledge base below
+        console.warn('Gemini generation unavailable or quota reached; falling back to knowledge base:', geminiError);
       }
-
-      contents.push({
-        role: 'user',
-        parts: [{ text: `${systemInstruction}\n\nUser Question: "${userMessage}"` }],
-      });
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents,
-      });
-
-      return {
-        text: response.text || 'I am here to assist you with any questions about PassItOn!',
-        suggestedLinks,
-      };
     }
 
     // -------------------------------------------------------------------------
