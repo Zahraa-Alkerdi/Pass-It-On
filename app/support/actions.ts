@@ -51,35 +51,48 @@ export async function getSupportAIResponse(
         select: {
           id: true,
           name: true,
-          role: true,
           mentorshipsOwed: true,
-          mentorshipsAsStudent: {
-            where: { status: { in: ['ACCEPTED', 'SUBMITTED'] } },
-            select: { id: true, skill: { select: { name: true } }, status: true },
+          mentorshipsAsMentee: {
+            where: { status: 'ACTIVE' },
+            select: {
+              id: true,
+              skill: { select: { name: true } },
+              status: true,
+              projects: {
+                orderBy: { createdAt: 'desc' },
+                take: 1,
+                select: { status: true, title: true },
+              },
+            },
           },
           mentorshipsAsMentor: {
-            where: { status: { in: ['ACCEPTED', 'SUBMITTED'] } },
+            where: { status: 'ACTIVE' },
             select: { id: true, skill: { select: { name: true } }, status: true },
           },
         },
       });
 
       if (user) {
+        const menteeSummary = user.mentorshipsAsMentee.map((m: any) => {
+          const projectStatus = m.projects[0]?.status ? ` [Project: ${m.projects[0].status}]` : ' [No project submitted yet]';
+          return `${m.skill.name}: ${m.status}${projectStatus}`;
+        }).join(', ') || 'None';
+
         userContextSummary = `Logged-in User:
 - Name: ${user.name}
-- Role: ${user.role}
+- Role: ${session.role}
 - Mentorships Owed to Community: ${user.mentorshipsOwed}
-- Active learning mentorships (as student): ${user.mentorshipsAsStudent.length} (${user.mentorshipsAsStudent.map((m: any) => `${m.skill.name}: ${m.status}`).join(', ') || 'None'})
+- Active learning mentorships (as student): ${user.mentorshipsAsMentee.length} (${menteeSummary})
 - Active mentoring sessions (as mentor): ${user.mentorshipsAsMentor.length} (${user.mentorshipsAsMentor.map((m: any) => `${m.skill.name}: ${m.status}`).join(', ') || 'None'})`;
 
         // Suggest useful navigation paths based on their state
-        if (user.role === 'ADMIN') {
+        if (session.role === 'ADMIN') {
           suggestedLinks.push({ label: 'Admin Dashboard', href: '/admin/dashboard' });
         } else {
           suggestedLinks.push({ label: 'My Dashboard', href: '/user/dashboard' });
           suggestedLinks.push({ label: 'Find Mentors', href: '/user/search' });
-          if (user.mentorshipsAsStudent.length > 0 || user.mentorshipsAsMentor.length > 0) {
-            const activeId = user.mentorshipsAsStudent[0]?.id || user.mentorshipsAsMentor[0]?.id;
+          if (user.mentorshipsAsMentee.length > 0 || user.mentorshipsAsMentor.length > 0) {
+            const activeId = user.mentorshipsAsMentee[0]?.id || user.mentorshipsAsMentor[0]?.id;
             suggestedLinks.push({ label: 'Open Active Workspace', href: `/user/workspace/${activeId}` });
           }
         }
