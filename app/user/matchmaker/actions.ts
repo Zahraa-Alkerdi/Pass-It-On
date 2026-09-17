@@ -110,7 +110,8 @@ export async function getAIResponse(
     const ai = getGeminiClient();
 
     if (ai) {
-      const systemPrompt = `You are the friendly, expert AI Matchmaker for "PassItOn", a student skill mentorship platform with a pay-it-forward philosophy.
+      try {
+        const systemPrompt = `You are the friendly, expert AI Matchmaker for "PassItOn", a student skill mentorship platform with a pay-it-forward philosophy.
 Your job is to:
 1. Understand the student's learning goals, skill level, and aspirations.
 2. Recommend the best real mentors from the platform's verified mentor directory.
@@ -141,66 +142,70 @@ IMPORTANT RULES FOR MATCHING:
 - If the conversation does not warrant recommending specific mentors yet (e.g. initial greeting or follow-up question), output an empty array: "matches": [].
 - Speak in natural, warm language. Do not expose internal IDs in your conversational text; refer to mentors by name.`;
 
-      // Build conversation contents for Gemini
-      const conversationContents = [];
+        // Build conversation contents for Gemini
+        const conversationContents = [];
 
-      // Add previous turns
-      for (const msg of messageHistory.slice(-6)) {
-        conversationContents.push({
-          role: msg.role === 'user' ? 'user' : 'model',
-          parts: [{ text: msg.content }],
-        });
-      }
-
-      // Add current message with current system context instruction
-      conversationContents.push({
-        role: 'user',
-        parts: [{ text: `${systemPrompt}\n\nStudent says: "${userMessage}"` }],
-      });
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: conversationContents,
-      });
-
-      const fullOutput = response.text || '';
-
-      // Parse matches JSON if present in model output
-      let recommendations: RecommendedMentor[] = [];
-      let narrativeText = fullOutput;
-
-      const jsonMatch = fullOutput.match(/```json\s*([\s\S]*?)\s*```/);
-      if (jsonMatch) {
-        try {
-          const parsed = JSON.parse(jsonMatch[1]);
-          if (Array.isArray(parsed.matches)) {
-            recommendations = parsed.matches
-              .map((m: any) => {
-                const mentorRecord = activeMentors.find((am: ActiveMentorItem) => am.id === m.mentorId);
-                if (!mentorRecord) return null;
-                return {
-                  id: mentorRecord.id,
-                  name: mentorRecord.name,
-                  bio: mentorRecord.bio,
-                  skills: mentorRecord.skills,
-                  matchScore: m.matchScore || 90,
-                  matchReason: m.matchReason || 'Matches your target skills and learning journey.',
-                };
-              })
-              .filter(Boolean) as RecommendedMentor[];
-          }
-          // Remove the raw JSON block from displayed narrative text
-          narrativeText = fullOutput.replace(/```json[\s\S]*?```/, '').trim();
-        } catch (parseErr) {
-          console.warn('Could not parse JSON matches block from Gemini response:', parseErr);
+        // Add previous turns
+        for (const msg of messageHistory.slice(-6)) {
+          conversationContents.push({
+            role: msg.role === 'user' ? 'user' : 'model',
+            parts: [{ text: msg.content }],
+          });
         }
-      }
 
-      return {
-        text: narrativeText,
-        recommendations,
-        mentorshipOwedNotice,
-      };
+        // Add current message with current system context instruction
+        conversationContents.push({
+          role: 'user',
+          parts: [{ text: `${systemPrompt}\n\nStudent says: "${userMessage}"` }],
+        });
+
+        const response = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: conversationContents,
+        });
+
+        const fullOutput = response.text || '';
+
+        // Parse matches JSON if present in model output
+        let recommendations: RecommendedMentor[] = [];
+        let narrativeText = fullOutput;
+
+        const jsonMatch = fullOutput.match(/```json\s*([\s\S]*?)\s*```/);
+        if (jsonMatch) {
+          try {
+            const parsed = JSON.parse(jsonMatch[1]);
+            if (Array.isArray(parsed.matches)) {
+              recommendations = parsed.matches
+                .map((m: any) => {
+                  const mentorRecord = activeMentors.find((am: ActiveMentorItem) => am.id === m.mentorId);
+                  if (!mentorRecord) return null;
+                  return {
+                    id: mentorRecord.id,
+                    name: mentorRecord.name,
+                    bio: mentorRecord.bio,
+                    skills: mentorRecord.skills,
+                    matchScore: m.matchScore || 90,
+                    matchReason: m.matchReason || 'Matches your target skills and learning journey.',
+                  };
+                })
+                .filter(Boolean) as RecommendedMentor[];
+            }
+            // Remove the raw JSON block from displayed narrative text
+            narrativeText = fullOutput.replace(/```json[\s\S]*?```/, '').trim();
+          } catch (parseErr) {
+            console.warn('Could not parse JSON matches block from Gemini response:', parseErr);
+          }
+        }
+
+        return {
+          text: narrativeText,
+          recommendations,
+          mentorshipOwedNotice,
+        };
+      } catch (geminiError) {
+        // If Gemini is unavailable or rate-limited (e.g. 429, 503), log and fall back to the semantic matcher below
+        console.warn('Gemini matchmaker generation unavailable or quota reached; falling back to keyword matcher:', geminiError);
+      }
     }
 
     // -------------------------------------------------------------------------
