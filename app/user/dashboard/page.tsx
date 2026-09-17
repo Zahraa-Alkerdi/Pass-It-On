@@ -87,34 +87,150 @@ export default async function DashboardPage() {
   });
 
   // ---------------------------------------------------------------------------
+  // STATS CARD CALCULATIONS (Zero new DB queries - derived in-memory)
+  // ---------------------------------------------------------------------------
+  // 1. Active Mentorships: Total count of ongoing mentorships in which the user participates
+  // either as a student/mentee or as a guide/mentor.
+  const activeCount = activeMentorships.length;
+
+  // 2. Certificates Earned: Mentorships where the current user was the student (mentee)
+  // and received an official admin-verified digital certification.
+  const certificatesCount = completedMentorships.filter(
+    (m) => m.mentorId !== userId && !!m.cert
+  ).length;
+
+  // 3. Mentorships Owed: The user's pay-it-forward pledge balance. Reframed positively
+  // to emphasize community contribution rather than a punitive penalty.
+  const owedCount = currentUser?.mentorshipsOwed ?? 0;
+
+  // 4. Skills Taught: Total distinct skills the user has shared as a mentor across
+  // all active and completed mentorships.
+  const skillsTaughtCount = new Set(
+    [...activeMentorships, ...completedMentorships]
+      .filter((m) => m.mentorId === userId)
+      .map((m) => m.skillId)
+  ).size;
+
+  // ---------------------------------------------------------------------------
   // RENDER UI
   // ---------------------------------------------------------------------------
   return (
-    <div className="space-y-12 pb-16">
-      {/* --- HEADER & ECONOMY STATUS --- */}
-      <div className="border-b border-slate-200 pb-8 mt-4 flex flex-col md:flex-row md:items-end justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Dashboard</h1>
-          <p className="text-slate-500 mt-2 text-lg">Manage your mentorship requests and active connections.</p>
-        </div>
-        
-        {/* Mentorship Economy Widget */}
-        {currentUser && currentUser.mentorshipsOwed > 0 && (
-          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-center gap-4 max-w-sm">
-            <div className="w-10 h-10 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center flex-shrink-0">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+    <div className="space-y-8 sm:space-y-10 pb-16">
+      {/* --- HEADER --- */}
+      <div className="border-b border-slate-200 pb-6 mt-4">
+        <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Dashboard</h1>
+        <p className="text-slate-500 mt-2 text-lg">Manage your mentorship requests, learning milestones, and teaching tracks.</p>
+      </div>
+
+      {/* --- SUMMARY STAT CARDS --- */}
+      {/* 
+        Responsive 4-column bento grid for high-level student & mentor metrics.
+        - Mobile: 1 column
+        - Tablet (sm): 2 columns
+        - Desktop (lg): 4 columns
+      */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+        {/* Card 1: Active Mentorships */}
+        <div className="bg-white/70 backdrop-blur-sm border border-slate-200/80 rounded-2xl sm:rounded-3xl p-5 shadow-sm flex flex-col justify-between">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Active Mentorships</span>
+            <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
               </svg>
             </div>
-            <div>
-              <p className="text-sm font-bold text-amber-900">Community Balance</p>
-              <p className="text-xs text-amber-700 mt-1 leading-tight">
-                You must mentor <strong>{currentUser.mentorshipsOwed}</strong> more student{currentUser.mentorshipsOwed > 1 ? 's' : ''} to pay it forward before requesting a new mentorship!
-              </p>
+          </div>
+          <div>
+            <div className="text-3xl font-black text-slate-900 tracking-tight">{activeCount}</div>
+            <p className="text-xs text-slate-500 mt-1">
+              {activeCount === 1 ? '1 ongoing connection' : `${activeCount} ongoing connections`}
+            </p>
+          </div>
+        </div>
+
+        {/* Card 2: Certificates Earned */}
+        <div className="bg-white/70 backdrop-blur-sm border border-slate-200/80 rounded-2xl sm:rounded-3xl p-5 shadow-sm flex flex-col justify-between">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Certificates Earned</span>
+            <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+              </svg>
             </div>
           </div>
-        )}
+          <div>
+            <div className="text-3xl font-black text-slate-900 tracking-tight">{certificatesCount}</div>
+            <p className="text-xs text-slate-500 mt-1">
+              {certificatesCount === 1 ? '1 verified credential' : `${certificatesCount} verified credentials`}
+            </p>
+          </div>
+        </div>
+
+        {/* Card 3: Mentorships Owed (Positively reframed pay-it-forward balance) */}
+        <div className="bg-white/70 backdrop-blur-sm border border-slate-200/80 rounded-2xl sm:rounded-3xl p-5 shadow-sm flex flex-col justify-between">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Mentorships Owed</span>
+            <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${owedCount > 0 ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600'}`}>
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+              </svg>
+            </div>
+          </div>
+          <div>
+            {owedCount === 0 ? (
+              <div className="text-xl sm:text-2xl font-black text-emerald-700 tracking-tight">All caught up!</div>
+            ) : (
+              <div className="text-3xl font-black text-amber-700 tracking-tight">{owedCount}</div>
+            )}
+            <p className="text-xs text-slate-500 mt-1">
+              {owedCount === 0
+                ? 'No outstanding pledges'
+                : owedCount === 1
+                ? 'Pledged to mentor 1 peer next'
+                : `Pledged to mentor ${owedCount} peers next`}
+            </p>
+          </div>
+        </div>
+
+        {/* Card 4: Skills Taught */}
+        <div className="bg-white/70 backdrop-blur-sm border border-slate-200/80 rounded-2xl sm:rounded-3xl p-5 shadow-sm flex flex-col justify-between">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Skills Taught</span>
+            <div className="w-8 h-8 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+              </svg>
+            </div>
+          </div>
+          <div>
+            <div className="text-3xl font-black text-slate-900 tracking-tight">{skillsTaughtCount}</div>
+            <p className="text-xs text-slate-500 mt-1">
+              {skillsTaughtCount === 1 ? '1 distinct skill shared' : `${skillsTaughtCount} distinct skills shared`}
+            </p>
+          </div>
+        </div>
       </div>
+
+      {/* --- COMMUNITY BALANCE BANNER --- */}
+      {/* 
+        Displayed only when mentorshipsOwed > 0, informing the user of the pay-it-forward requirement
+        before initiating a new learning track.
+      */}
+      {currentUser && currentUser.mentorshipsOwed > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-center gap-4">
+          <div className="w-10 h-10 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center flex-shrink-0">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          </div>
+          <div>
+            <p className="text-sm font-bold text-amber-900">Community Balance</p>
+            <p className="text-xs text-amber-700 mt-1 leading-tight">
+              You must mentor <strong>{currentUser.mentorshipsOwed}</strong> more student{currentUser.mentorshipsOwed > 1 ? 's' : ''} to pay it forward before requesting a new mentorship!
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* --- ACTIVE MENTORSHIPS --- */}
       <section className="bg-white/50 backdrop-blur-sm border border-slate-100 rounded-3xl shadow-sm p-4 sm:p-6 md:p-8">
