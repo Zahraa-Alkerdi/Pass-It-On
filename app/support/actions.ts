@@ -134,7 +134,9 @@ RESPONSE GUIDELINES:
 - Give direct, step-by-step guidance on how to navigate the platform.
 - If they ask about their active mentorship or owed balance, reference their context respectfully.
 - Use clear bullet points and clean formatting.
-- Keep tone encouraging, professional, and concise.`;
+- Keep tone encouraging, professional, and concise.
+- Be warm and personable — make the student feel supported, not like they're reading documentation.
+- Only state facts that are covered in the PLATFORM ARCHITECTURE & RULES or CURRENT USER CONTEXT sections above. If asked something outside that scope, say you're not sure and point them to their Dashboard rather than guessing or inventing details.`;
 
         const contents = [];
         for (const msg of messageHistory.slice(-6)) {
