@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { fetchMentorsBySkill } from './actions';
 import { requestMentorship } from './requestAction';
+import CelebrationPopup from '@/components/ui/CelebrationPopup';
 
 interface MentorListProps {
   initialMentors: any[];
@@ -32,6 +33,9 @@ export default function MentorList({ initialMentors, skillId }: MentorListProps)
   // Track the status of mentorship requests by mentorId ('idle' | 'loading' | 'success' | error message)
   const [requestStatus, setRequestStatus] = useState<Record<string, string>>({});
 
+  // Controls visibility of the motivational mascot celebration popup
+  const [showCelebration, setShowCelebration] = useState<boolean>(false);
+
   // ---------------------------------------------------------------------------
   // HANDLERS
   // ---------------------------------------------------------------------------
@@ -59,9 +63,16 @@ export default function MentorList({ initialMentors, skillId }: MentorListProps)
   };
 
   /**
-   * Handles requesting mentorship from a specific mentor
+   * Handles requesting mentorship from a specific mentor.
+   * 
+   * Non-Blocking Behavior:
+   * Fires the visual celebration popup immediately without awaiting the async database request.
    */
   const handleRequest = async (mentorId: string) => {
+    // 1. Immediately trigger the non-blocking celebration popup
+    setShowCelebration(true);
+
+    // 2. Concurrently submit the actual mentorship request to the database
     setRequestStatus(prev => ({ ...prev, [mentorId]: 'loading' }));
     
     try {
@@ -165,6 +176,12 @@ export default function MentorList({ initialMentors, skillId }: MentorListProps)
           </button>
         </div>
       )}
+
+      {/* NON-BLOCKING VISUAL CELEBRATION OVERLAY */}
+      <CelebrationPopup
+        isOpen={showCelebration}
+        onClose={() => setShowCelebration(false)}
+      />
     </div>
   );
 }

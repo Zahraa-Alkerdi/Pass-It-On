@@ -12,6 +12,7 @@ import { useState } from 'react';
 import { requestMentorship } from '@/app/user/search/requestAction';
 import { Sparkles, CheckCircle2, AlertCircle, ArrowRight, UserCheck } from 'lucide-react';
 import type { RecommendedMentor } from './actions';
+import CelebrationPopup from '@/components/ui/CelebrationPopup';
 
 interface MatchmakerMentorCardProps {
   mentor: RecommendedMentor;
@@ -24,10 +25,16 @@ export default function MatchmakerMentorCard({ mentor }: MatchmakerMentorCardPro
   );
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [statusMessage, setStatusMessage] = useState<string>('');
+  // Controls visibility of the motivational mascot celebration popup
+  const [showCelebration, setShowCelebration] = useState<boolean>(false);
 
   const handleSendRequest = async () => {
     if (!selectedSkillId) return;
 
+    // 1. Immediately trigger the non-blocking celebration popup
+    setShowCelebration(true);
+
+    // 2. Concurrently execute the database request
     setStatus('loading');
     setStatusMessage('');
 
@@ -142,6 +149,12 @@ export default function MatchmakerMentorCard({ mentor }: MatchmakerMentorCardPro
           )}
         </button>
       )}
+
+      {/* Non-blocking visual celebration overlay */}
+      <CelebrationPopup
+        isOpen={showCelebration}
+        onClose={() => setShowCelebration(false)}
+      />
     </div>
   );
 }
