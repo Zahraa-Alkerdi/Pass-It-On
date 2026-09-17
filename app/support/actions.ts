@@ -146,12 +146,15 @@ RESPONSE GUIDELINES:
 
         contents.push({
           role: 'user',
-          parts: [{ text: `${systemInstruction}\n\nUser Question: "${userMessage}"` }],
+          parts: [{ text: userMessage }],
         });
 
         const response = await ai.models.generateContent({
           model: 'gemini-3.8-flash',
           contents,
+          config: {
+            systemInstruction,
+          },
         });
 
         return {
