@@ -16,6 +16,7 @@
 import prisma from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
 import { getGeminiClient } from '@/lib/gemini';
+import { MAX_ACTIVE_MENTORSHIPS } from '@/lib/constants';
 
 export interface RecommendedMentor {
   id: string;
@@ -51,22 +52,34 @@ export async function getAIResponse(
     // -------------------------------------------------------------------------
     // 1. GATHER LIVE CONTEXT FROM DATABASE
     // -------------------------------------------------------------------------
-    // Fetch all skills
-    const allSkills = await prisma.skill.findMany({
-      select: { id: true, name: true, description: true },
-      orderBy: { name: 'asc' },
-    });
-
-    // Fetch active users who can serve as mentors (excluding current user if logged in)
-    const potentialMentors = await prisma.user.findMany({
-      include: {
-        userSkills: {
-          include: {
-            skill: true,
+    // Fetch all skills, potential mentors, and currently active mentorships in parallel.
+    // Using a single batch query for active mentorships avoids N+1 queries while accurately
+    // determining each mentor's current capacity.
+    const [allSkills, potentialMentors, activeMentorships] = await Promise.all([
+      prisma.skill.findMany({
+        select: { id: true, name: true, description: true },
+        orderBy: { name: 'asc' },
+      }),
+      prisma.user.findMany({
+        include: {
+          userSkills: {
+            include: {
+              skill: true,
+            },
           },
         },
-      },
-    });
+      }),
+      prisma.mentorship.findMany({
+        where: { status: 'ACTIVE' },
+        select: { mentorId: true },
+      }),
+    ]);
+
+    // Calculate active mentorship load per mentor
+    const mentorActiveLoad = new Map<string, number>();
+    for (const m of activeMentorships) {
+      mentorActiveLoad.set(m.mentorId, (mentorActiveLoad.get(m.mentorId) || 0) + 1);
+    }
 
     interface MentorSkill {
       id: string;
@@ -80,8 +93,15 @@ export async function getAIResponse(
       skills: MentorSkill[];
     }
 
+    // Filter active mentors: exclude current logged-in user, mentors without skills,
+    // and mentors who have reached or exceeded the active capacity cap (MAX_ACTIVE_MENTORSHIPS)
     const activeMentors: ActiveMentorItem[] = potentialMentors
-      .filter((u: any) => u.id !== currentUserId && u.userSkills && u.userSkills.length > 0)
+      .filter((u: any) => {
+        if (u.id === currentUserId) return false;
+        if (!u.userSkills || u.userSkills.length === 0) return false;
+        const currentLoad = mentorActiveLoad.get(u.id) || 0;
+        return currentLoad < MAX_ACTIVE_MENTORSHIPS;
+      })
       .map((u: any) => ({
         id: u.id,
         name: u.name,
@@ -145,15 +165,24 @@ IMPORTANT RULES FOR MATCHING:
         // Build conversation contents for Gemini
         const conversationContents = [];
 
-        // Add previous turns
-        for (const msg of messageHistory.slice(-6)) {
+        // Add prior turns (exclude the last item if it matches the current user message)
+        const priorTurns = messageHistory.length > 0 && messageHistory[messageHistory.length - 1].role === 'user'
+          ? messageHistory.slice(0, -1)
+          : messageHistory;
+
+        for (const msg of priorTurns.slice(-6)) {
           conversationContents.push({
             role: msg.role === 'user' ? 'user' : 'model',
             parts: [{ text: msg.content }],
           });
         }
 
-        // Add current message with current system context instruction
+        // Ensure Gemini contents start with a 'user' turn (strip leading 'model' turns like initial greeting)
+        while (conversationContents.length > 0 && conversationContents[0].role === 'model') {
+          conversationContents.shift();
+        }
+
+        // Add single current message turn with system context instruction
         conversationContents.push({
           role: 'user',
           parts: [{ text: `${systemPrompt}\n\nStudent says: "${userMessage}"` }],
@@ -219,7 +248,7 @@ IMPORTANT RULES FOR MATCHING:
       (s.description && normalizedInput.includes(s.description.toLowerCase()))
     );
 
-    let candidateMentors = activeMentors;
+    let candidateMentors: ActiveMentorItem[] = [];
     if (matchingSkills.length > 0) {
       const skillIds = new Set(matchingSkills.map((s: { id: string }) => s.id));
       candidateMentors = activeMentors.filter((m: ActiveMentorItem) =>
@@ -251,6 +280,11 @@ IMPORTANT RULES FOR MATCHING:
       narrativeText = `I analyzed your learning goals for "${userMessage}". Based on our verified community directory, I highly recommend connecting with **${names}**!
 
 They have direct experience in the skills you're focusing on and have active availability to guide you through hands-on milestones. You can send them a direct mentorship request right below!`;
+    } else if (matchingSkills.length > 0) {
+      const skillNames = matchingSkills.map((s: { name: string }) => s.name).join(', ');
+      narrativeText = `Great choice focusing on **${skillNames}**! While it is a recognized skill track on PassItOn, we don't currently have active community mentors registered for it.
+
+As our pay-it-forward community grows, newly certified peers frequently join as mentors. In the meantime, you can explore our Search page to browse all available mentors and skills, or let me know if there's a related topic you'd like to explore!`;
     } else {
       narrativeText = `I hear you! Whether you want to master web development, explore AI, or polish your portfolio, having a direct mentor accelerates your journey. 
 
