@@ -73,17 +73,24 @@ export async function getSupportAIResponse(
       });
 
       if (user) {
-        const menteeSummary = user.mentorshipsAsMentee.map((m: any) => {
-          const projectStatus = m.projects[0]?.status ? ` [Project: ${m.projects[0].status}]` : ' [No project submitted yet]';
-          return `${m.skill.name}: ${m.status}${projectStatus}`;
+        // Defensive normalization: Ensure relationship arrays are at least empty lists ([])
+        // Why: When running in development mode against the in-memory fallback store or if a selective
+        // database projection returns undefined for relational fields, accessing .map() or .length directly
+        // on user.mentorshipsAsMentee would throw an unhandled TypeError. Guarding with `|| []` guarantees resilience.
+        const menteeMentorships: any[] = user.mentorshipsAsMentee || [];
+        const mentorMentorships: any[] = user.mentorshipsAsMentor || [];
+
+        const menteeSummary = menteeMentorships.map((m: any) => {
+          const projectStatus = m.projects?.[0]?.status ? ` [Project: ${m.projects[0].status}]` : ' [No project submitted yet]';
+          return `${m.skill?.name || 'Skill'}: ${m.status}${projectStatus}`;
         }).join(', ') || 'None';
 
         userContextSummary = `Logged-in User:
 - Name: ${user.name}
 - Role: ${session.role}
 - Mentorships Owed to Community: ${user.mentorshipsOwed}
-- Active learning mentorships (as student): ${user.mentorshipsAsMentee.length} (${menteeSummary})
-- Active mentoring sessions (as mentor): ${user.mentorshipsAsMentor.length} (${user.mentorshipsAsMentor.map((m: any) => `${m.skill.name}: ${m.status}`).join(', ') || 'None'})`;
+- Active learning mentorships (as student): ${menteeMentorships.length} (${menteeSummary})
+- Active mentoring sessions (as mentor): ${mentorMentorships.length} (${mentorMentorships.map((m: any) => `${m.skill?.name || 'Skill'}: ${m.status}`).join(', ') || 'None'})`;
 
         // Suggest useful navigation paths based on their state
         if (session.role === 'ADMIN') {
@@ -91,8 +98,8 @@ export async function getSupportAIResponse(
         } else {
           suggestedLinks.push({ label: 'My Dashboard', href: '/user/dashboard' });
           suggestedLinks.push({ label: 'Find Mentors', href: '/user/search' });
-          if (user.mentorshipsAsMentee.length > 0 || user.mentorshipsAsMentor.length > 0) {
-            const activeId = user.mentorshipsAsMentee[0]?.id || user.mentorshipsAsMentor[0]?.id;
+          if (menteeMentorships.length > 0 || mentorMentorships.length > 0) {
+            const activeId = menteeMentorships[0]?.id || mentorMentorships[0]?.id;
             suggestedLinks.push({ label: 'Open Active Workspace', href: `/user/workspace/${activeId}` });
           }
         }
