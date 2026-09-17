@@ -15,7 +15,6 @@
 
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
-import { getSupportAIResponse, type SupportResponse } from './actions';
 import {
   HelpCircle,
   ArrowLeft,
@@ -87,8 +86,12 @@ export default function SupportPage() {
       content: textToSend.trim(),
     };
 
+    msgCounterRef.current += 1;
+    const aiMsgId = `support-ai-${msgCounterRef.current}`;
+
     const currentMessages = [...messages, userMessage];
-    setMessages(currentMessages);
+    // Pre-insert assistant message to receive real-time streaming tokens
+    setMessages([...currentMessages, { id: aiMsgId, role: 'assistant', content: '', suggestedLinks: [] }]);
     setInputValue('');
     setIsLoading(true);
 
@@ -98,29 +101,83 @@ export default function SupportPage() {
         content: msg.content,
       }));
 
-      const res: SupportResponse = await getSupportAIResponse(userMessage.content, historyContext);
+      // Call streaming Route Handler via fetch
+      const response = await fetch('/api/support', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userMessage: userMessage.content,
+          messageHistory: historyContext,
+        }),
+      });
 
-      msgCounterRef.current += 1;
-      const aiMessage: SupportMessage = {
-        id: `support-ai-${msgCounterRef.current}`,
-        role: 'assistant',
-        content: res.text,
-        suggestedLinks: res.suggestedLinks,
-      };
+      if (!response.ok || !response.body) {
+        throw new Error(`Failed to connect to support API: HTTP ${response.status}`);
+      }
 
-      setMessages((prev) => [...prev, aiMessage]);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let sseBuffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        sseBuffer += decoder.decode(value, { stream: true });
+        const events = sseBuffer.split('\n\n');
+        // Keep trailing partial event chunk in buffer
+        sseBuffer = events.pop() || '';
+
+        for (const eventBlock of events) {
+          const trimmed = eventBlock.trim();
+          if (!trimmed.startsWith('data:')) continue;
+          const jsonStr = trimmed.replace(/^data:\s*/, '');
+
+          try {
+            const data = JSON.parse(jsonStr);
+
+            if (data.type === 'token') {
+              // Append incremental token text to the active assistant message
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === aiMsgId ? { ...m, content: m.content + data.content } : m
+                )
+              );
+            } else if (data.type === 'done') {
+              // Terminal done event carries final full text and structured navigation links
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === aiMsgId
+                    ? {
+                        ...m,
+                        content: data.text || m.content,
+                        suggestedLinks: data.suggestedLinks,
+                      }
+                    : m
+                )
+              );
+            } else if (data.type === 'error') {
+              throw new Error(data.message || 'Streaming error');
+            }
+          } catch (parseErr) {
+            console.warn('Could not parse SSE chunk:', parseErr);
+          }
+        }
+      }
     } catch (error) {
       console.error('Failed to fetch support AI response:', error);
-      msgCounterRef.current += 1;
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `support-err-${msgCounterRef.current}`,
-          role: 'assistant',
-          content:
-            "I ran into an issue retrieving the latest platform documentation. Please check your Dashboard or try asking again!",
-        },
-      ]);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === aiMsgId
+            ? {
+                ...m,
+                content:
+                  m.content ||
+                  "I ran into an issue retrieving the latest platform documentation. Please check your Dashboard or try asking again!",
+              }
+            : m
+        )
+      );
     } finally {
       setIsLoading(false);
     }
@@ -171,7 +228,7 @@ export default function SupportPage() {
         ref={chatContainerRef}
         className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 bg-slate-50"
       >
-        {messages.map((msg) => {
+        {messages.filter((msg) => msg.content.length > 0).map((msg) => {
           const isUser = msg.role === 'user';
           return (
             <div
@@ -229,7 +286,7 @@ export default function SupportPage() {
         })}
 
         {/* Loading Indicator */}
-        {isLoading && (
+        {isLoading && (!messages[messages.length - 1] || messages[messages.length - 1].content === '') && (
           <div className="flex gap-3 sm:gap-4 flex-row items-center">
             <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-indigo-600 text-white flex items-center justify-center opacity-70 animate-pulse">
               <LifeBuoy className="w-4 h-4" />

@@ -15,7 +15,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
-import { getAIResponse, type RecommendedMentor } from './actions';
+import type { RecommendedMentor } from './actions';
 import MatchmakerMentorCard from './MatchmakerMentorCard';
 import { Sparkles, ArrowLeft, Send, Compass, BookOpen, AlertTriangle } from 'lucide-react';
 
@@ -77,8 +77,12 @@ export default function MatchmakerPage() {
       content: textToSend.trim(),
     };
 
+    msgCounterRef.current += 1;
+    const aiMsgId = `ai-msg-${msgCounterRef.current}`;
+
     const updatedHistory = [...messages, userMessage];
-    setMessages(updatedHistory);
+    // Pre-insert assistant message to receive real-time streaming tokens
+    setMessages([...updatedHistory, { id: aiMsgId, role: 'assistant', content: '' }]);
     setInputValue('');
     setIsLoading(true);
 
@@ -88,29 +92,84 @@ export default function MatchmakerPage() {
         content: m.content,
       }));
 
-      const res = await getAIResponse(userMessage.content, historyContext);
+      // Call streaming Route Handler via fetch
+      const response = await fetch('/api/matchmaker', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userMessage: userMessage.content,
+          messageHistory: historyContext,
+        }),
+      });
 
-      msgCounterRef.current += 1;
-      const aiMessage: ChatMessage = {
-        id: `ai-msg-${msgCounterRef.current}`,
-        role: 'assistant',
-        content: res.text,
-        recommendations: res.recommendations,
-        notice: res.mentorshipOwedNotice,
-      };
+      if (!response.ok || !response.body) {
+        throw new Error(`Failed to connect to matchmaker: HTTP ${response.status}`);
+      }
 
-      setMessages((prev) => [...prev, aiMessage]);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let sseBuffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        sseBuffer += decoder.decode(value, { stream: true });
+        const events = sseBuffer.split('\n\n');
+        // Keep trailing partial event chunk in buffer
+        sseBuffer = events.pop() || '';
+
+        for (const eventBlock of events) {
+          const trimmed = eventBlock.trim();
+          if (!trimmed.startsWith('data:')) continue;
+          const jsonStr = trimmed.replace(/^data:\s*/, '');
+
+          try {
+            const data = JSON.parse(jsonStr);
+
+            if (data.type === 'token') {
+              // Append incremental token text to the active assistant message
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === aiMsgId ? { ...m, content: m.content + data.content } : m
+                )
+              );
+            } else if (data.type === 'done') {
+              // Terminal done event carries final narrative and structured mentor recommendation cards
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === aiMsgId
+                    ? {
+                        ...m,
+                        content: data.text || m.content,
+                        recommendations: data.recommendations,
+                        notice: data.notice,
+                      }
+                    : m
+                )
+              );
+            } else if (data.type === 'error') {
+              throw new Error(data.message || 'Streaming error');
+            }
+          } catch (parseErr) {
+            console.warn('Could not parse SSE chunk:', parseErr);
+          }
+        }
+      }
     } catch (err) {
       console.error('Failed to get matchmaker response:', err);
-      msgCounterRef.current += 1;
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `ai-err-${msgCounterRef.current}`,
-          role: 'assistant',
-          content: "I had trouble connecting to the mentor database. Please try again or browse mentors directly from the search tab.",
-        },
-      ]);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === aiMsgId
+            ? {
+                ...m,
+                content:
+                  m.content ||
+                  "I had trouble connecting to the mentor database. Please try again or browse mentors directly from the search tab.",
+              }
+            : m
+        )
+      );
     } finally {
       setIsLoading(false);
     }
@@ -159,7 +218,7 @@ export default function MatchmakerPage() {
         ref={chatContainerRef}
         className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 bg-slate-50"
       >
-        {messages.map((msg) => {
+        {messages.filter((msg) => msg.content.length > 0).map((msg) => {
           const isUser = msg.role === 'user';
           return (
             <div
@@ -222,8 +281,8 @@ export default function MatchmakerPage() {
           );
         })}
 
-        {/* Loading Indicator */}
-        {isLoading && (
+        {/* Loading Indicator: Shown before initial token arrives */}
+        {isLoading && (!messages[messages.length - 1] || messages[messages.length - 1].content === '') && (
           <div className="flex gap-3 sm:gap-4 flex-row items-center">
             <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-indigo-600 text-white flex items-center justify-center opacity-70 animate-pulse">
               <Sparkles className="w-4 h-4" />
